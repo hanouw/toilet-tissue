@@ -18,7 +18,6 @@ export default function App() {
     const stored = localStorage.getItem('toilet_user_session');
     return stored ? JSON.parse(stored) : null;
   });
-  const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginName, setLoginName] = useState('');
   const [loginPasscode, setLoginPasscode] = useState('');
 
@@ -49,11 +48,11 @@ export default function App() {
   useEffect(() => {
     const loadGhost = async () => {
       try {
-        const response = await fetch(`/ghost_level_${currentLevel.id}.json`);
+        const response = await fetch(`/api/scores?levelId=${currentLevel.id}`);
         if (response.ok) {
-          const pathArray = await response.json();
-          if (Array.isArray(pathArray) && pathArray.length > 0) {
-            setGhostPath(pathArray);
+          const data = await response.json();
+          if (data.ghost && Array.isArray(data.ghost) && data.ghost.length > 0) {
+            setGhostPath(data.ghost);
             return;
           }
         }
@@ -167,7 +166,6 @@ export default function App() {
     };
     setUserSession(session);
     localStorage.setItem('toilet_user_session', JSON.stringify(session));
-    setShowLoginModal(false);
     setLoginName('');
     setLoginPasscode('');
   };
@@ -178,6 +176,95 @@ export default function App() {
     localStorage.removeItem('toilet_user_session');
   };
 
+  // 1. ENFORCE LOGIN WALL
+  if (!userSession) {
+    return (
+      <div style={{
+        width: '100%',
+        maxWidth: '1000px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        minHeight: '85vh',
+        justifyContent: 'center',
+        fontFamily: '"Outfit", sans-serif'
+      }}>
+        <h1 className="comic-title" style={{ fontSize: '3.5rem', marginBottom: '8px' }}>🧻 급똥 레이서 🚽</h1>
+        <p style={{ color: '#00e5ff', marginBottom: '28px', fontWeight: 'bold', fontSize: '15px', textShadow: '0 0 10px rgba(0,229,255,0.3)' }}>
+          ⚠️ 플레이를 위해선 괄약근 안전 로그인이 필수입니다!
+        </p>
+        
+        <div className="glass animate-float" style={{
+          padding: '36px',
+          width: '360px',
+          border: '3px solid var(--color-primary)',
+          textAlign: 'center',
+          background: 'rgba(30, 30, 38, 0.95)',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
+        }}>
+          <span style={{ fontSize: '48px', display: 'block', marginBottom: '8px' }}>🔑</span>
+          <h2 style={{ color: '#ffeb3b', marginBottom: '12px', fontFamily: 'var(--font-heading)', fontSize: '22px' }}>
+            로그인 및 닉네임 등록
+          </h2>
+          <p style={{ fontSize: '11px', color: '#b0bec5', marginBottom: '24px', lineHeight: '1.4' }}>
+            닉네임과 비밀번호(4자리)를 설정하세요.<br/>
+            최초 로그인 시 해당 닉네임이 입력하신 비밀번호로 즉시 자동 보호됩니다. (도용 방지)
+          </p>
+          <form onSubmit={handleLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <input
+              type="text"
+              placeholder="닉네임 입력 (최대 10자)"
+              maxLength={10}
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
+              required
+              style={{
+                padding: '12px',
+                borderRadius: '8px',
+                border: 'none',
+                background: '#2d2d38',
+                color: '#fff',
+                outline: 'none',
+                fontSize: '14px',
+                textAlign: 'center'
+              }}
+            />
+            <input
+              type="password"
+              placeholder="비밀번호 4자리 숫자"
+              maxLength={4}
+              pattern="\d{4}"
+              value={loginPasscode}
+              onChange={(e) => setLoginPasscode(e.target.value)}
+              required
+              style={{
+                padding: '12px',
+                borderRadius: '8px',
+                border: 'none',
+                background: '#2d2d38',
+                color: '#fff',
+                outline: 'none',
+                textAlign: 'center',
+                letterSpacing: '6px',
+                fontSize: '14px',
+                fontWeight: 'bold'
+              }}
+            />
+            <button type="submit" className="btn-comic btn-yellow" style={{
+              padding: '14px',
+              fontSize: '15px',
+              marginTop: '8px',
+              boxShadow: '3px 3px 0 #000'
+            }}>
+              🛡️ 안전 로그인 및 입장
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. MAIN GAME INTERFACE (ONLY ACCESSIBLE ONCE LOGGED IN)
   return (
     <div style={{ width: '100%', maxWidth: '1000px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       
@@ -197,17 +284,18 @@ export default function App() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* USER SESSION BAR */}
-          {userSession ? (
-            <div className="glass" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', fontSize: '12px', border: '1px solid rgba(0, 230, 118, 0.2)' }}>
-              <span style={{ color: '#00e676', fontWeight: 'bold' }}>👤 {userSession.name} 로그인됨</span>
-              <button onClick={handleLogout} className="btn-comic btn-grey" style={{ padding: '4px 8px', fontSize: '10px', boxShadow: '1px 1px 0px #000' }}>로그아웃</button>
-            </div>
-          ) : (
-            <button onClick={() => { soundManager.playSelect(); setShowLoginModal(true); }} className="btn-comic btn-yellow" style={{ padding: '8px 12px', fontSize: '12px', boxShadow: '2px 2px 0px #000' }}>
-              🔑 로그인 / 가입
-            </button>
-          )}
+          {/* LOGGED IN ACCOUNT CHIP */}
+          <div className="glass" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px 12px',
+            fontSize: '12px',
+            border: '1px solid rgba(0, 230, 118, 0.2)'
+          }}>
+            <span style={{ color: '#00e676', fontWeight: 'bold' }}>👤 {userSession.name} 로그인됨</span>
+            <button onClick={handleLogout} className="btn-comic btn-grey" style={{ padding: '4px 8px', fontSize: '10px', boxShadow: '1px 1px 0px #000' }}>로그아웃</button>
+          </div>
 
           <div className="glass" style={{ padding: '8px 16px', fontSize: '14px', border: '1px solid rgba(0, 229, 255, 0.2)' }}>
             🏆 누적 점수: <strong style={{ color: '#ffeb3b', fontSize: '16px' }}>{totalScore}점</strong>
@@ -232,16 +320,29 @@ export default function App() {
             <div className="level-grid">
               {LEVELS.map((lvl) => {
                 const isSelected = currentLevel.id === lvl.id;
+                const isUnlocked = lvl.id === 1 || levelHighScores[lvl.id - 1] !== undefined;
                 const high = levelHighScores[lvl.id];
                 return (
                   <div
                     key={lvl.id}
                     className={`level-card ${isSelected ? 'selected' : ''}`}
-                    onClick={() => handleSelectLevel(lvl)}
+                    onClick={() => {
+                      if (isUnlocked) {
+                        handleSelectLevel(lvl);
+                      } else {
+                        soundManager.playFart();
+                      }
+                    }}
+                    style={{
+                      opacity: isUnlocked ? 1.0 : 0.45,
+                      cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                      pointerEvents: 'auto',
+                      border: isSelected ? '2px solid var(--color-secondary)' : !isUnlocked ? '1px dashed rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.06)'
+                    }}
                   >
                     <div>
                       <div style={{ fontWeight: 'bold', fontSize: '16px', color: isSelected ? '#00e5ff' : '#ffffff' }}>
-                        Lv {lvl.id}. {lvl.name}
+                        Lv {lvl.id}. {lvl.name} {!isUnlocked && '🔒'}
                       </div>
                       <div style={{ fontSize: '12px', color: '#b0bec5', marginTop: '4px' }}>
                         {lvl.obstacles.length > 0 ? `🧱 장애물 ${lvl.obstacles.length}개` : '벽 없음'}
@@ -251,17 +352,24 @@ export default function App() {
                     </div>
                     
                     <div style={{ textAlign: 'right' }}>
-                      {high ? (
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ffeb3b' }}>
-                            {high.score}점
+                      {isUnlocked ? (
+                        high ? (
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ffeb3b' }}>
+                              {high.score}점
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#b0bec5' }}>
+                              {high.time}초 / {high.tissue}m
+                            </div>
                           </div>
-                          <div style={{ fontSize: '10px', color: '#b0bec5' }}>
-                            {high.time}초 / {high.tissue}m
-                          </div>
-                        </div>
+                        ) : (
+                          <div style={{ fontSize: '12px', color: '#00e676', fontStyle: 'italic', fontWeight: 'bold' }}>입장 가능</div>
+                        )
                       ) : (
-                        <div style={{ fontSize: '12px', color: '#607d8b', fontStyle: 'italic' }}>기록 없음</div>
+                        <div>
+                          <div style={{ fontSize: '12px', color: '#ff3d00', fontWeight: 'bold' }}>잠김 🔒</div>
+                          <div style={{ fontSize: '9px', color: '#b0bec5' }}>이전 클리어 필수</div>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -352,7 +460,6 @@ export default function App() {
           levelId={currentLevel.id}
           latestRun={latestRun}
           userSession={userSession}
-          onTriggerLogin={() => setShowLoginModal(true)}
           onBack={handleBackToLobby}
         />
       )}
@@ -570,78 +677,6 @@ export default function App() {
             </div>
           )}
 
-        </div>
-      )}
-
-      {/* LOGIN MODAL */}
-      {showLoginModal && (
-        <div className="glass" style={{
-          position: 'fixed',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          zIndex: 200,
-          padding: '30px',
-          width: '340px',
-          border: '2px solid var(--color-primary)',
-          textAlign: 'center',
-          background: 'rgba(30, 30, 38, 0.95)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
-        }}>
-          <span style={{ fontSize: '32px', display: 'block', marginBottom: '8px' }}>🔑</span>
-          <h2 style={{ color: '#ffeb3b', marginBottom: '12px', fontFamily: 'var(--font-heading)', fontSize: '20px' }}>
-            괄약근 간편 가입 & 로그인
-          </h2>
-          <p style={{ fontSize: '11px', color: '#b0bec5', marginBottom: '20px', lineHeight: '1.4' }}>
-            입력하신 닉네임과 비밀번호(4자리)는 저장소에 최초 등록 후 비밀번호가 보호막 역할을 하여, 타인이 닉네임을 도용하지 못하도록 방지합니다!
-          </p>
-          <form onSubmit={handleLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <input
-              type="text"
-              placeholder="닉네임 입력 (최대 10자)"
-              maxLength={10}
-              value={loginName}
-              onChange={(e) => setLoginName(e.target.value)}
-              required
-              style={{
-                padding: '10px',
-                borderRadius: '6px',
-                border: 'none',
-                background: '#2d2d38',
-                color: '#fff',
-                outline: 'none',
-                fontSize: '14px'
-              }}
-            />
-            <input
-              type="password"
-              placeholder="비밀번호 4자리 숫자"
-              maxLength={4}
-              pattern="\d{4}"
-              value={loginPasscode}
-              onChange={(e) => setLoginPasscode(e.target.value)}
-              required
-              style={{
-                padding: '10px',
-                borderRadius: '6px',
-                border: 'none',
-                background: '#2d2d38',
-                color: '#fff',
-                outline: 'none',
-                textAlign: 'center',
-                letterSpacing: '4px',
-                fontSize: '14px'
-              }}
-            />
-            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <button type="submit" className="btn-comic btn-yellow" style={{ flex: 1, padding: '10px', fontSize: '13px' }}>
-                가입/로그인
-              </button>
-              <button type="button" onClick={() => setShowLoginModal(false)} className="btn-comic btn-grey" style={{ flex: 1, padding: '10px', fontSize: '13px' }}>
-                취소
-              </button>
-            </div>
-          </form>
         </div>
       )}
       

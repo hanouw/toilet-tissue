@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { soundManager } from '../utils/sound';
-import { GITHUB_REPO } from '../config';
 
 const DEFAULT_LEADERBOARD = {
   1: [
@@ -31,19 +30,21 @@ const DEFAULT_LEADERBOARD = {
   ]
 };
 
-export default function Leaderboard({ levelId, latestRun, userSession, onTriggerLogin, onBack }) {
+export default function Leaderboard({ levelId, latestRun, userSession, onBack }) {
   const [scores, setScores] = useState([]);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [activeTab, setActiveTab] = useState('global');
   const [localScores, setLocalScores] = useState([]);
 
-  // Load global leaderboard from public json
+  // Load global leaderboard from real-time Vercel KV API
   const loadGlobalLeaderboard = async () => {
     try {
-      const response = await fetch('/leaderboard.json');
+      const response = await fetch(`/api/scores?levelId=${levelId}`);
       if (response.ok) {
         const data = await response.json();
-        setScores(data[levelId] || []);
+        setScores(data.leaderboard && data.leaderboard.length > 0 ? data.leaderboard : DEFAULT_LEADERBOARD[levelId] || []);
       } else {
         setScores(DEFAULT_LEADERBOARD[levelId] || []);
       }
@@ -91,19 +92,18 @@ export default function Leaderboard({ levelId, latestRun, userSession, onTrigger
     localStorage.setItem(`toilet_local_scores_lvl_${levelId}`, JSON.stringify(updated));
   };
 
-  // 2. Submit globally via GitHub Issue
-  const handleSubmitGlobal = (e) => {
+  // 2. Submit globally in background via Vercel KV API
+  const handleSubmitGlobal = async (e) => {
     e.preventDefault();
     if (!userSession || !latestRun) return;
 
     soundManager.playSelect();
+    setIsSubmitting(true);
+    setSubmitError('');
     
-    // Save to local list first
+    // Save locally
     handleSubmitLocal(userSession.name);
 
-    // Generate GitHub Issue payload
-    const title = `[SCORE_SUBMIT] Lv.${levelId} - ${latestRun.score}점 (닉네임: ${userSession.name})`;
-    
     const payload = {
       levelId: parseInt(levelId),
       name: userSession.name,
@@ -114,14 +114,33 @@ export default function Leaderboard({ levelId, latestRun, userSession, onTrigger
       path: latestRun.path || []
     };
 
-    const body = `### 글로벌 랭킹 점수 등록 제보\n\n아래의 플레이 데이터가 검증을 거쳐 실시간 랭킹 리더보드에 업데이트됩니다. 대시보드를 닫지 말고 잠시 기다리시면 GitHub Actions가 실행되어 재배포됩니다.\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``;
+    try {
+      const response = await fetch('/api/scores', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
 
-    // Open GitHub Issue creation link
-    const githubUrl = `https://github.com/${GITHUB_REPO}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
-    window.open(githubUrl, '_blank');
-    
-    setSubmitted(true);
-    setActiveTab('local'); // Redirect view to local to see user's score immediately
+      const resData = await response.json();
+
+      if (response.ok && resData.success) {
+        soundManager.playWin();
+        setSubmitted(true);
+        // Instant reload with newly returned real-time leaderboard
+        setScores(resData.leaderboard && resData.leaderboard.length > 0 ? resData.leaderboard : []);
+        setActiveTab('global'); // Directly show global so they see their score updated instantly!
+      } else {
+        soundManager.playFart();
+        setSubmitError(resData.error || '점수 전송 도중 에러가 발생했습니다.');
+      }
+    } catch (err) {
+      soundManager.playFart();
+      setSubmitError('네트워크 오류 또는 API 연결 실패.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const displayedScores = activeTab === 'global' ? scores : localScores;
@@ -137,8 +156,29 @@ export default function Leaderboard({ levelId, latestRun, userSession, onTrigger
       border: '1px solid rgba(0, 229, 255, 0.15)',
       background: 'rgba(30, 30, 36, 0.95)',
       boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-      fontFamily: '"Outfit", sans-serif'
+      fontFamily: '"Outfit", sans-serif',
+      position: 'relative'
     }}>
+      {/* LOADER OVERLAY */}
+      {isSubmitting && (
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(24, 24, 27, 0.9)',
+          borderRadius: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10,
+          gap: '12px'
+        }}>
+          <span style={{ fontSize: '48px', animation: 'float 1.5s ease-in-out infinite' }}>🧻</span>
+          <div style={{ fontWeight: 'bold', color: '#ffeb3b' }}>서버에 괄약근 데이터 전송 중...</div>
+          <div style={{ fontSize: '11px', color: '#b0bec5' }}>Vercel KV 실시간 데이터베이스에 반영하고 있습니다.</div>
+        </div>
+      )}
+
       <h2 style={{
         textAlign: 'center',
         margin: '0 0 16px 0',
@@ -201,54 +241,73 @@ export default function Leaderboard({ levelId, latestRun, userSession, onTrigger
             나의 괄약근 등급: <strong style={{ color: '#00e676' }}>{getRankTitle(latestRun.score)}</strong>
           </div>
           
-          {userSession ? (
-            <form onSubmit={handleSubmitGlobal} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  value={userSession.name}
-                  disabled
-                  style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: '#1f1f28',
-                    color: '#00e676',
-                    fontWeight: 'bold',
-                    fontSize: '14px',
-                    cursor: 'not-allowed'
-                  }}
-                />
-                <button type="submit" className="btn-comic btn-yellow" style={{
-                  padding: '10px 16px',
-                  fontSize: '13px',
-                  boxShadow: '2px 2px 0px #000'
-                }}>
-                  🌍 글로벌 랭킹 등록
-                </button>
-              </div>
-              
-              <div style={{ fontSize: '10px', color: '#b0bec5', textAlign: 'center', marginTop: '4px', lineHeight: '1.3' }}>
-                * <strong>{userSession.name}</strong> 계정으로 등록을 시도합니다. (Passcode: ****)<br/>
-                [글로벌 랭킹 등록] 클릭 시 GitHub Issues 생성 창이 열립니다. [Submit new issue]를 눌러주세요.
-              </div>
-            </form>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '6px 0' }}>
-              <p style={{ fontSize: '12px', color: '#ff8a65', marginBottom: '10px' }}>
-                ⚠️ 글로벌 랭킹을 보호하고 등록하려면 간편 로그인이 필요합니다!
-              </p>
-              <button
-                type="button"
-                onClick={onTriggerLogin}
-                className="btn-comic btn-yellow"
-                style={{ padding: '8px 16px', fontSize: '13px', boxShadow: '2px 2px 0px #000' }}
-              >
-                🔑 간편 로그인 / 가입하러 가기
+          <form onSubmit={handleSubmitGlobal} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                value={userSession.name}
+                disabled
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#1f1f28',
+                  color: '#00e676',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  cursor: 'not-allowed',
+                  textAlign: 'center'
+                }}
+              />
+              <button type="submit" className="btn-comic btn-yellow" style={{
+                padding: '10px 16px',
+                fontSize: '13px',
+                boxShadow: '2px 2px 0px #000'
+              }}>
+                🌍 실시간 글로벌 랭킹 등록
               </button>
             </div>
+            
+            <div style={{ fontSize: '10px', color: '#b0bec5', textAlign: 'center', marginTop: '4px', lineHeight: '1.3' }}>
+              * <strong>{userSession.name}</strong> 계정으로 Vercel KV DB에 직접 등록합니다.<br/>
+              * 제출하는 즉시 랭킹 리더보드가 실시간(0.1초)으로 반영되어 나타납니다!
+            </div>
+          </form>
+
+          {submitError && (
+            <div style={{
+              marginTop: '12px',
+              padding: '8px',
+              background: 'rgba(255, 61, 0, 0.1)',
+              border: '1px solid rgba(255, 61, 0, 0.3)',
+              color: '#ff8a65',
+              fontSize: '12px',
+              textAlign: 'center',
+              borderRadius: '6px'
+            }}>
+              🚨 <strong>제출 실패:</strong> {submitError} <br/>
+              <span style={{ fontSize: '10px' }}>(Vercel 대시보드에 KV (Redis) 스토리지가 연결되어 있는지 확인해 주세요.)</span>
+            </div>
           )}
+        </div>
+      )}
+
+      {/* Global score submit success confirmation text */}
+      {submitted && (
+        <div style={{
+          background: 'rgba(0, 230, 118, 0.08)',
+          padding: '12px',
+          borderRadius: '8px',
+          border: '1px solid rgba(0, 230, 118, 0.3)',
+          color: '#00e676',
+          fontSize: '13px',
+          textAlign: 'center',
+          marginBottom: '20px',
+          lineHeight: '1.4'
+        }}>
+          ✅ <strong>실시간 글로벌 랭킹 등록 완료!</strong> <br/>
+          점수 데이터가 Vercel KV 클라우드에 성공적으로 반영되었습니다. 🚽✨
         </div>
       )}
 
