@@ -27,6 +27,7 @@ export default function App() {
   const [latestRun, setLatestRun] = useState(null);
   const [failReason, setFailReason] = useState('');
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [globalSubmitStatus, setGlobalSubmitStatus] = useState('idle'); // 'idle' | 'submitting' | 'success' | 'error'
 
   // Ghosts competitive system
   const [ghostPath, setGhostPath] = useState(null);
@@ -83,6 +84,7 @@ export default function App() {
     soundManager.playSelect();
     setGameState('drawing');
     setIsPaused(false);
+    setGlobalSubmitStatus('idle');
   };
 
   const handlePauseToggle = () => {
@@ -94,6 +96,7 @@ export default function App() {
     soundManager.playSelect();
     setGameState('drawing');
     setIsPaused(false);
+    setGlobalSubmitStatus('idle');
   };
 
   const handleBackToLobby = () => {
@@ -101,6 +104,7 @@ export default function App() {
     setGameState('idle');
     setIsPaused(false);
     setShowLeaderboard(false);
+    setGlobalSubmitStatus('idle');
   };
 
   const handleSelectLevel = (lvl) => {
@@ -108,6 +112,7 @@ export default function App() {
     setCurrentLevel(lvl);
     setGameState('idle');
     setShowLeaderboard(false);
+    setGlobalSubmitStatus('idle');
   };
 
   const handleSelectSkin = (skin) => {
@@ -119,10 +124,11 @@ export default function App() {
     setSelectedSkin(skin);
   };
 
-  const handleWin = (scoreData) => {
+  const handleWin = async (scoreData) => {
     setLatestRun(scoreData);
     setGameState('win');
     
+    // 1. Save score locally
     const currentHigh = levelHighScores[currentLevel.id]?.score || 0;
     if (scoreData.score > currentHigh) {
       const newHighs = {
@@ -138,6 +144,59 @@ export default function App() {
       
       const newTotal = Object.values(newHighs).reduce((sum, item) => sum + item.score, 0);
       setTotalScore(newTotal);
+    }
+
+    // Save to the local leaderboard for Leaderboard component
+    const getRankTitle = (score) => {
+      if (score >= 9000) return "👑 황금 괄약근";
+      if (score >= 8000) return "🧻 휴지 장인";
+      if (score >= 6500) return "🚶 평범한 시민";
+      if (score >= 4500) return "💦 아슬아슬 세이프";
+      return "💩 턱걸이 골인";
+    };
+
+    const storedLocal = localStorage.getItem(`toilet_local_scores_lvl_${currentLevel.id}`);
+    const localScores = storedLocal ? JSON.parse(storedLocal) : [];
+    const newLocalEntry = {
+      name: userSession ? userSession.name : "익명",
+      score: scoreData.score,
+      time: scoreData.time,
+      tissue: scoreData.tissueUsed,
+      rank: getRankTitle(scoreData.score),
+      date: new Date().toLocaleDateString()
+    };
+    const updatedLocal = [...localScores, newLocalEntry].sort((a, b) => b.score - a.score).slice(0, 10);
+    localStorage.setItem(`toilet_local_scores_lvl_${currentLevel.id}`, JSON.stringify(updatedLocal));
+
+    // 2. AUTOMATIC SUBMISSION TO VERCEL KV
+    if (userSession) {
+      setGlobalSubmitStatus('submitting');
+      try {
+        const response = await fetch('/api/scores', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            levelId: parseInt(currentLevel.id),
+            name: userSession.name,
+            passcode: userSession.passcode,
+            score: scoreData.score,
+            time: scoreData.time.toString(),
+            tissue: scoreData.tissueUsed,
+            path: scoreData.path || []
+          })
+        });
+
+        const resData = await response.json();
+        if (response.ok && resData.success) {
+          setGlobalSubmitStatus('success');
+        } else {
+          setGlobalSubmitStatus('error');
+        }
+      } catch (e) {
+        setGlobalSubmitStatus('error');
+      }
     }
   };
 
@@ -346,8 +405,9 @@ export default function App() {
                       </div>
                       <div style={{ fontSize: '12px', color: '#b0bec5', marginTop: '4px' }}>
                         {lvl.obstacles.length > 0 ? `🧱 장애물 ${lvl.obstacles.length}개` : '벽 없음'}
-                        {lvl.puddles.length > 0 ? ` 💦 물웅덩이 ${lvl.puddles.length}개` : ''}
-                        {lvl.monsters.length > 0 ? ` 👾 몬스터 ${lvl.monsters.length}마리` : ''}
+                        {lvl.puddles && lvl.puddles.length > 0 ? ` 💦 물웅덩이 ${lvl.puddles.length}개` : ''}
+                        {lvl.movingPuddles && lvl.movingPuddles.length > 0 ? ` 💦 이동물 ${lvl.movingPuddles.length}개` : ''}
+                        {lvl.monsters && lvl.monsters.length > 0 ? ` 👾 몬스터 ${lvl.monsters.length}마리` : ''}
                       </div>
                     </div>
                     
@@ -458,8 +518,6 @@ export default function App() {
       {showLeaderboard && (
         <Leaderboard
           levelId={currentLevel.id}
-          latestRun={latestRun}
-          userSession={userSession}
           onBack={handleBackToLobby}
         />
       )}
@@ -479,7 +537,7 @@ export default function App() {
           }}>
             <div>
               <span style={{ fontSize: '12px', textTransform: 'uppercase', color: '#00e5ff', fontWeight: 'bold' }}>
-                Stage 0{currentLevel.id}
+                Stage {currentLevel.id < 10 ? `0${currentLevel.id}` : currentLevel.id}
               </span>
               <h2 style={{ fontSize: '18px', margin: 0, color: '#ffffff' }}>{currentLevel.name}</h2>
             </div>
@@ -577,7 +635,7 @@ export default function App() {
                 background: 'rgba(0,0,0,0.3)',
                 padding: '16px',
                 borderRadius: '12px',
-                marginBottom: '20px',
+                marginBottom: '12px',
                 fontSize: '14px',
                 textAlign: 'left',
                 display: 'flex',
@@ -593,6 +651,23 @@ export default function App() {
                 </div>
               </div>
 
+              {/* AUTOMATIC SUBMIT STATUS HUD */}
+              <div style={{
+                marginBottom: '16px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: 'rgba(0,0,0,0.2)',
+                fontSize: '13px',
+                fontWeight: '600',
+                textAlign: 'center',
+                border: globalSubmitStatus === 'success' ? '1px solid rgba(0, 230, 118, 0.35)' : globalSubmitStatus === 'submitting' ? '1px solid rgba(255, 235, 59, 0.35)' : globalSubmitStatus === 'error' ? '1px solid rgba(255, 61, 0, 0.35)' : 'none',
+                color: globalSubmitStatus === 'success' ? '#00e676' : globalSubmitStatus === 'submitting' ? '#ffeb3b' : globalSubmitStatus === 'error' ? '#ff8a65' : '#ffffff'
+              }}>
+                {globalSubmitStatus === 'submitting' && "🌍 글로벌 랭킹 자동 등록 중... 🧻"}
+                {globalSubmitStatus === 'success' && "🌍 실시간 글로벌 랭킹 자동 등록 완료! ✅"}
+                {globalSubmitStatus === 'error' && "🌍 글로벌 랭킹 자동 등록 실패 (서버 연결 불가) ❌"}
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <button
                   onClick={() => {
@@ -602,7 +677,7 @@ export default function App() {
                   className="btn-comic btn-yellow"
                   style={{ width: '100%' }}
                 >
-                  🏆 랭킹 등록 & 확인하기
+                  🏆 랭킹 리더보드 확인하기
                 </button>
                 
                 {currentLevel.id < LEVELS.length ? (
@@ -679,6 +754,8 @@ export default function App() {
 
         </div>
       )}
+
+
       
       {/* FOOTER */}
       <footer style={{ marginTop: '40px', fontSize: '12px', color: '#607d8b', textAlign: 'center', paddingBottom: '20px' }}>

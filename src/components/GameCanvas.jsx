@@ -22,6 +22,7 @@ export default function GameCanvas({
   const [urgency, setUrgency] = useState(0); // 0 to 100
   const [characterPos, setCharacterPos] = useState({ x: 0, y: 0 });
   const [monsters, setMonsters] = useState([]);
+  const [movingPuddles, setMovingPuddles] = useState([]);
   const [particles, setParticles] = useState([]);
   const [tissueLength, setTissueLength] = useState(0);
   
@@ -35,6 +36,7 @@ export default function GameCanvas({
   const charPosRef = useRef({ x: 0, y: 0 });
   const pathRef = useRef([]);
   const monstersRef = useRef([]);
+  const movingPuddlesRef = useRef([]);
   const levelRef = useRef(level);
   const urgencyRef = useRef(0);
   const startTimeRef = useRef(0);
@@ -70,7 +72,7 @@ export default function GameCanvas({
     charPosRef.current = startPos;
     
     // Copy monsters and add initial movement state
-    const levelMonsters = levelRef.current.monsters.map(m => {
+    const levelMonsters = (levelRef.current.monsters || []).map(m => {
       const copy = { ...m };
       if (copy.pathType === 'pingpong') {
         copy.currentWaypointIdx = 0;
@@ -80,6 +82,18 @@ export default function GameCanvas({
     });
     setMonsters(levelMonsters);
     monstersRef.current = levelMonsters;
+
+    // Reset Moving Puddles (Level 11 & 13)
+    const levelPuddles = (levelRef.current.movingPuddles || []).map(p => {
+      const copy = { ...p };
+      if (copy.pathType === 'pingpong') {
+        copy.currentWaypointIdx = 0;
+        copy.targetWaypoint = copy.waypoints[0];
+      }
+      return copy;
+    });
+    setMovingPuddles(levelPuddles);
+    movingPuddlesRef.current = levelPuddles;
 
     // Reset Mother Patrol if level has it
     if (levelRef.current.motherPatrol) {
@@ -116,7 +130,6 @@ export default function GameCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     
@@ -149,8 +162,6 @@ export default function GameCanvas({
     
     // Wind Zone effect during drawing (Deflect path!)
     if (level.windZone && pointInRect(coords, level.windZone)) {
-      // Wind deflects to the right (forceX > 0)
-      // Add a slight wave/noise for gusty wind feel
       const windWave = Math.sin(Date.now() * 0.015) * 6;
       coords.x += level.windZone.forceX * 3.5 + windWave;
       coords.y += level.windZone.forceY * 3.5;
@@ -290,7 +301,34 @@ export default function GameCanvas({
       monstersRef.current = updatedMonsters;
       setMonsters(updatedMonsters);
 
-      // 2. Move Mother Patrol NPC (Level 8)
+      // 2. Move Moving Puddles (Level 11 & 13)
+      const updatedPuddles = movingPuddlesRef.current.map(puddle => {
+        let { x, y, speed, pathType } = puddle;
+        
+        if (pathType === 'pingpong') {
+          let target = puddle.targetWaypoint;
+          let dist = getDistance({ x, y }, target);
+          
+          if (dist < 5) {
+            const nextIdx = (puddle.currentWaypointIdx + 1) % puddle.waypoints.length;
+            puddle.currentWaypointIdx = nextIdx;
+            puddle.targetWaypoint = puddle.waypoints[nextIdx];
+            target = puddle.waypoints[nextIdx];
+          }
+          
+          const dx = target.x - x;
+          const dy = target.y - y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          x += (dx / len) * speed * (dt / 16);
+          y += (dy / len) * speed * (dt / 16);
+        }
+        
+        return { ...puddle, x, y };
+      });
+      movingPuddlesRef.current = updatedPuddles;
+      setMovingPuddles(updatedPuddles);
+
+      // 3. Move Mother Patrol NPC (Level 8 & 13)
       if (levelRef.current.motherPatrol) {
         const mPatrol = levelRef.current.motherPatrol;
         let { x, y } = motherPosRef.current;
@@ -384,7 +422,6 @@ export default function GameCanvas({
         let windOffsetY = 0;
 
         if (levelRef.current.windZone && pointInRect(charPosRef.current, levelRef.current.windZone)) {
-          // Wind pushes character to the right, slightly fighting their speed
           windOffsetX = levelRef.current.windZone.forceX * 0.8;
           windOffsetY = levelRef.current.windZone.forceY * 0.8;
         }
@@ -462,13 +499,14 @@ export default function GameCanvas({
 
         // COLLISION CHECKS DURING RUN
         
-        // A. Water dissolving toilet paper
+        // A. Static Water puddles & B. Moving water puddles dissolving toilet paper
+        const allPuddles = [...levelRef.current.puddles, ...updatedPuddles];
         for (let i = currIdx; i < fullPath.length - 1; i++) {
           const pA = fullPath[i];
           const pB = fullPath[i + 1];
           
           let segmentWet = false;
-          for (const puddle of levelRef.current.puddles) {
+          for (const puddle of allPuddles) {
             if (lineIntersectsCircle(pA, pB, puddle, puddle.r)) {
               segmentWet = true;
               break;
@@ -497,11 +535,94 @@ export default function GameCanvas({
           }
         }
 
-        // B. Electric Sparks (Level 6)
-        const isSparkActive = Math.sin(Date.now() * 0.007) > -0.2; // Spark active most of the time
+        // C. Fire Sprinklers Cross Water Sprays (Level 9)
+        if (levelRef.current.sprinklers) {
+          for (const sprinkler of levelRef.current.sprinklers) {
+            const isActive = Math.sin(Date.now() * sprinkler.pulseSpeed) > 0.0;
+            if (isActive) {
+              // Spray horizontal segment: (x - length, y) to (x + length, y)
+              // Spray vertical segment: (x, y - length) to (x, y + length)
+              const hSegA = { x: sprinkler.x - sprinkler.length, y: sprinkler.y };
+              const hSegB = { x: sprinkler.x + sprinkler.length, y: sprinkler.y };
+              const vSegA = { x: sprinkler.x, y: sprinkler.y - sprinkler.length };
+              const vSegB = { x: sprinkler.x, y: sprinkler.y + sprinkler.length };
+              
+              // Spray thickness circle check (we approximate spray line as a series of small circles, or check distance to spray lines)
+              for (let i = currIdx; i < fullPath.length - 1; i++) {
+                const pA = fullPath[i];
+                const pB = fullPath[i + 1];
+                
+                // Segment-circle collision on several points along the cross
+                let sprayHit = false;
+                for (let offset = -sprinkler.length; offset <= sprinkler.length; offset += 30) {
+                  const ptH = { x: sprinkler.x + offset, y: sprinkler.y };
+                  const ptV = { x: sprinkler.x, y: sprinkler.y + offset };
+                  if (lineIntersectsCircle(pA, pB, ptH, 12) || lineIntersectsCircle(pA, pB, ptV, 12)) {
+                    sprayHit = true;
+                    break;
+                  }
+                }
+                
+                if (sprayHit) {
+                  cutIndexRef.current = i;
+                  setGameState('failed');
+                  onLose("세차게 내리쬐는 스프링클러 물줄기에 휴지가 다 젖어 찢어졌습니다! 🚿💦");
+                  soundManager.playLose();
+                  soundManager.playSquish();
+                  createParticles((pA.x + pB.x)/2, (pA.y + pB.y)/2, '#00b0ff', 20, 1.2);
+                  return;
+                }
+              }
+
+              // Check Character Spray collision
+              const dH = Math.abs(currentPos.y - sprinkler.y);
+              const dV = Math.abs(currentPos.x - sprinkler.x);
+              const inHSpray = dH <= 20 && Math.abs(currentPos.x - sprinkler.x) <= sprinkler.length;
+              const inVSpray = dV <= 20 && Math.abs(currentPos.y - sprinkler.y) <= sprinkler.length;
+              
+              if (inHSpray || inVSpray) {
+                setGameState('failed');
+                onLose("소방 스프링클러 물벼락을 정면으로 맞아 온몸이 젖어 주저앉았습니다! 🚿💧😭");
+                soundManager.playLose();
+                soundManager.playSquish();
+                createParticles(currentPos.x, currentPos.y, '#00e5ff', 30, 1.5);
+                return;
+              }
+            }
+          }
+        }
+
+        // D. Fart Bombs Poop Mines (Level 10 & 13)
+        if (levelRef.current.bombs) {
+          for (const bomb of levelRef.current.bombs) {
+            // Check character proximity
+            if (getDistance(bomb, currentPos) <= bomb.r + 15) {
+              setGameState('failed');
+              onLose("유황 똥 지뢰를 밟아 대장 폭발 사고가 일어났습니다! 💩💣💥🔥");
+              soundManager.playLose();
+              soundManager.playFart();
+              createParticles(currentPos.x, currentPos.y, '#8d6e63', 35, 2.0);
+              return;
+            }
+            // Check active toilet paper overlap
+            for (let i = currIdx; i < fullPath.length - 1; i++) {
+              if (lineIntersectsCircle(fullPath[i], fullPath[i+1], bomb, bomb.r)) {
+                cutIndexRef.current = i;
+                setGameState('failed');
+                onLose("휴지 선이 똥지뢰를 건드려 퓨전 폭발이 일어났습니다! 💩💣🔥");
+                soundManager.playLose();
+                soundManager.playFart();
+                createParticles(bomb.x, bomb.y, '#795548', 25, 1.8);
+                return;
+              }
+            }
+          }
+        }
+
+        // E. Electric Sparks
+        const isSparkActive = Math.sin(Date.now() * 0.007) > -0.2;
         if (levelRef.current.sparks && isSparkActive) {
           for (const spark of levelRef.current.sparks) {
-            // Check collision with toilet paper segments
             for (let i = currIdx; i < fullPath.length - 1; i++) {
               if (lineIntersectsCircle(fullPath[i], fullPath[i+1], spark, spark.r)) {
                 cutIndexRef.current = i;
@@ -513,7 +634,6 @@ export default function GameCanvas({
                 return;
               }
             }
-            // Check character hit
             if (getDistance(spark, currentPos) <= spark.r + 15) {
               setGameState('failed');
               onLose("바닥의 고전압 스파크에 감전되어 기절하셨습니다! ⚡⚡💥");
@@ -525,22 +645,18 @@ export default function GameCanvas({
           }
         }
 
-        // C. Mother Patrol Flashlight Cone (Level 8)
+        // F. Mother Patrol
         if (levelRef.current.motherPatrol) {
           const mPatrol = levelRef.current.motherPatrol;
           const mPos = motherPosRef.current;
           const distToMother = getDistance(mPos, currentPos);
           
           if (distToMother <= mPatrol.sightRadius) {
-            // Calculate angle from mother to player
             const angleToPlayer = Math.atan2(currentPos.y - mPos.y, currentPos.x - mPos.x);
-            // Flashlight cone direction is motherAngleRef.current
             let angleDiff = angleToPlayer - motherAngleRef.current;
-            // Normalize angle to [-PI, PI]
             while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
             while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
 
-            // Flashlight angle cone is about 40 degrees (0.7 radians)
             if (Math.abs(angleDiff) <= 0.7) {
               setGameState('failed');
               onLose("방 청소하러 오신 어머니의 시야(손전등 불빛)에 들켜 등짝 스매싱을 맞았습니다! 👵🚨💥");
@@ -552,7 +668,7 @@ export default function GameCanvas({
           }
         }
 
-        // D. Monsters cutting Toilet Paper line
+        // G. Monsters cutting line
         for (const monster of updatedMonsters) {
           for (let i = currIdx; i < fullPath.length - 1; i++) {
             const pA = fullPath[i];
@@ -607,10 +723,9 @@ export default function GameCanvas({
         ctx.stroke();
       }
 
-      // Draw Wind Zone (Level 7)
+      // Draw Wind Zone
       if (levelRef.current.windZone) {
         const wz = levelRef.current.windZone;
-        
         ctx.fillStyle = 'rgba(0, 229, 255, 0.04)';
         ctx.fillRect(wz.x, wz.y, wz.width, wz.height);
         
@@ -620,13 +735,11 @@ export default function GameCanvas({
         ctx.strokeRect(wz.x, wz.y, wz.width, wz.height);
         ctx.setLineDash([]);
 
-        // Draw wind text/icon
         ctx.font = '12px sans-serif';
         ctx.fillStyle = '#00e5ff';
         ctx.textAlign = 'center';
         ctx.fillText(wz.label, wz.x + wz.width / 2, wz.y + 20);
 
-        // Draw flowing arrows for wind direction
         ctx.strokeStyle = 'rgba(0, 229, 255, 0.15)';
         ctx.lineWidth = 2;
         const arrowSpacing = 80;
@@ -645,8 +758,9 @@ export default function GameCanvas({
         }
       }
 
-      // Draw Water Puddles
-      levelRef.current.puddles.forEach(puddle => {
+      // Draw Water Puddles (Static & Moving)
+      const allPuddles = [...levelRef.current.puddles, ...movingPuddles];
+      allPuddles.forEach(puddle => {
         const grad = ctx.createRadialGradient(puddle.x, puddle.y, 0, puddle.x, puddle.y, puddle.r);
         grad.addColorStop(0, 'rgba(0, 176, 255, 0.45)');
         grad.addColorStop(0.7, 'rgba(0, 176, 255, 0.25)');
@@ -668,12 +782,11 @@ export default function GameCanvas({
         ctx.stroke();
       });
 
-      // Draw Electric Sparks (Level 6)
+      // Draw Electric Sparks
       if (levelRef.current.sparks) {
         const isSparkActive = Math.sin(Date.now() * 0.007) > -0.2;
         levelRef.current.sparks.forEach(spark => {
           if (isSparkActive) {
-            // Draw electric field glow
             const grad = ctx.createRadialGradient(spark.x, spark.y, 0, spark.x, spark.y, spark.r + 10);
             grad.addColorStop(0, 'rgba(255, 235, 59, 0.45)');
             grad.addColorStop(0.6, 'rgba(255, 145, 0, 0.2)');
@@ -684,7 +797,6 @@ export default function GameCanvas({
             ctx.arc(spark.x, spark.y, spark.r + 10, 0, Math.PI * 2);
             ctx.fill();
             
-            // Draw spark lightning vectors
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -701,7 +813,6 @@ export default function GameCanvas({
             ctx.font = '16px Arial';
             ctx.fillText('⚡', spark.x, spark.y);
           } else {
-            // Inactive spark indicators (thin wire outline)
             ctx.strokeStyle = 'rgba(120, 120, 120, 0.4)';
             ctx.lineWidth = 1;
             ctx.beginPath();
@@ -709,6 +820,68 @@ export default function GameCanvas({
             ctx.stroke();
             ctx.fillText('🔌', spark.x, spark.y);
           }
+        });
+      }
+
+      // Draw Fire Sprinklers Cross Water Sprays (Level 9)
+      if (levelRef.current.sprinklers) {
+        levelRef.current.sprinklers.forEach(sprinkler => {
+          const isActive = Math.sin(Date.now() * sprinkler.pulseSpeed) > 0.0;
+          
+          if (isActive) {
+            // Draw glowing water cross spray
+            const gradH = ctx.createLinearGradient(sprinkler.x - sprinkler.length, sprinkler.y, sprinkler.x + sprinkler.length, sprinkler.y);
+            gradH.addColorStop(0, 'rgba(0, 229, 255, 0)');
+            gradH.addColorStop(0.5, 'rgba(0, 229, 255, 0.35)');
+            gradH.addColorStop(1, 'rgba(0, 229, 255, 0)');
+
+            const gradV = ctx.createLinearGradient(sprinkler.x, sprinkler.y - sprinkler.length, sprinkler.x, sprinkler.y + sprinkler.length);
+            gradV.addColorStop(0, 'rgba(0, 229, 255, 0)');
+            gradV.addColorStop(0.5, 'rgba(0, 229, 255, 0.35)');
+            gradV.addColorStop(1, 'rgba(0, 229, 255, 0)');
+
+            // Horizontal spray rectangle
+            ctx.fillStyle = gradH;
+            ctx.fillRect(sprinkler.x - sprinkler.length, sprinkler.y - 12, sprinkler.length * 2, 24);
+
+            // Vertical spray rectangle
+            ctx.fillStyle = gradV;
+            ctx.fillRect(sprinkler.x - 12, sprinkler.y - sprinkler.length, 24, sprinkler.length * 2);
+
+            // Draw spray water droplets details
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([2, 12]);
+            ctx.beginPath();
+            ctx.moveTo(sprinkler.x - sprinkler.length, sprinkler.y);
+            ctx.lineTo(sprinkler.x + sprinkler.length, sprinkler.y);
+            ctx.moveTo(sprinkler.x, sprinkler.y - sprinkler.length);
+            ctx.lineTo(sprinkler.x, sprinkler.y + sprinkler.length);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          // Sprinkler Head box
+          ctx.font = '24px Arial';
+          ctx.fillText('🚿', sprinkler.x, sprinkler.y);
+        });
+      }
+
+      // Draw Fart Bombs Poop Mines (Level 10 & 13)
+      if (levelRef.current.bombs) {
+        levelRef.current.bombs.forEach(bomb => {
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = '#ff3d00';
+          ctx.font = '32px Arial';
+          ctx.fillText('💩', bomb.x, bomb.y);
+          ctx.shadowBlur = 0;
+
+          // Flashing red light indicator
+          const lightFlash = Math.floor(Date.now() / 200) % 2 === 0;
+          ctx.fillStyle = lightFlash ? '#ff3d00' : '#4e342e';
+          ctx.beginPath();
+          ctx.arc(bomb.x + 8, bomb.y - 10, 4, 0, Math.PI * 2);
+          ctx.fill();
         });
       }
 
@@ -755,10 +928,6 @@ export default function GameCanvas({
       // Draw Path (Toilet Paper Roll Line 🧻)
       if (pathRef.current.length > 0) {
         const fullPath = pathRef.current;
-        
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-
         for (let i = 0; i < fullPath.length - 1; i++) {
           const ptA = fullPath[i];
           const ptB = fullPath[i + 1];
@@ -815,37 +984,31 @@ export default function GameCanvas({
         ctx.fillText(obs.label || '', x + w / 2, y + h / 2);
       });
 
-      // Draw Mother Patrol NPC (Level 8)
+      // Draw Mother Patrol NPC (Level 8 & 13)
       if (levelRef.current.motherPatrol) {
         const mPatrol = levelRef.current.motherPatrol;
         const mPos = motherPosRef.current;
         const mAngle = motherAngleRef.current;
 
-        // Draw Flashlight Sight Cone (Yellow semi-transparent sector)
         ctx.fillStyle = 'rgba(255, 235, 59, 0.15)';
         ctx.beginPath();
         ctx.moveTo(mPos.x, mPos.y);
         
-        // Sight cone span is about 80 degrees (0.7 rad on each side)
         const startConeAngle = mAngle - 0.7;
         const endConeAngle = mAngle + 0.7;
-        
         ctx.arc(mPos.x, mPos.y, mPatrol.sightRadius, startConeAngle, endConeAngle);
         ctx.closePath();
         ctx.fill();
 
-        // flash light arc border
         ctx.strokeStyle = 'rgba(255, 235, 59, 0.35)';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(mPos.x, mPos.y, mPatrol.sightRadius, startConeAngle, endConeAngle);
         ctx.stroke();
 
-        // Draw Mother Emoji
         ctx.font = '34px Arial';
         ctx.fillText('👵', mPos.x, mPos.y);
         
-        // Patrol indicator text
         ctx.font = '10px sans-serif';
         ctx.fillStyle = '#ffeb3b';
         ctx.fillText('순찰중', mPos.x, mPos.y - 25);
@@ -864,6 +1027,7 @@ export default function GameCanvas({
         if (monster.name.includes('고양이')) emoji = '🐱';
         else if (monster.name.includes('청소기')) emoji = '🤖';
         else if (monster.name.includes('똥')) emoji = '💩';
+        else if (monster.name.includes('불독')) emoji = '🐶';
         
         ctx.fillText(emoji, monster.x, monster.y);
         ctx.shadowBlur = 0;
@@ -951,7 +1115,7 @@ export default function GameCanvas({
     gameLoopRef.current = requestAnimationFrame(loop);
 
     return () => cancelAnimationFrame(gameLoopRef.current);
-  }, [gameState, isPaused, path, selectedSkin, currentGhost, ghostPlaybackActive, motherPos, motherAngle]);
+  }, [gameState, isPaused, path, selectedSkin, currentGhost, ghostPlaybackActive, motherPos, motherAngle, movingPuddles]);
 
   return (
     <div className="canvas-container" style={{ position: 'relative', width: '100%', maxWidth: '800px', margin: '0 auto' }}>

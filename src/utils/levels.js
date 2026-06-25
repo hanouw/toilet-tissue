@@ -195,7 +195,7 @@ export const LEVELS = [
       y: 100,
       width: 440,
       height: 400,
-      forceX: 1.5, // blows to the right
+      forceX: 1.5,
       forceY: 0,
       label: "강풍 발생 구역 🌀💨"
     },
@@ -246,5 +246,180 @@ export const LEVELS = [
     },
     parTime: 16,
     parTissue: 1200,
+  },
+  {
+    id: 9,
+    name: "스프링클러 미로 (The Maze Sprinkler)",
+    intro: "방안 가득 화재 감지 스프링클러가 멋대로 물줄기를 뿜고 있습니다! 물줄기가 사그라들 때 타이밍을 맞춰 전진하세요! 🚿💦",
+    hint: "주기적으로 십자(+) 모양으로 뻗어나가는 물줄기에 휴지가 닿으면, 물에 젖어 바로 찢어지고 끊어집니다!",
+    start: { x: 85, y: 150 },
+    toilet: { x: 720, y: 450 },
+    obstacles: [
+      { x: 250, y: 0, width: 60, height: 220, label: "벽체 🧱", color: "#37474f" },
+      { x: 490, y: 380, width: 60, height: 220, label: "벽체 🧱", color: "#37474f" }
+    ],
+    puddles: [],
+    monsters: [],
+    sprinklers: [
+      { x: 250, y: 400, r: 16, length: 140, pulseSpeed: 0.04, label: "분사기 🚿" },
+      { x: 550, y: 200, r: 16, length: 140, pulseSpeed: 0.035, label: "분사기 🚿" }
+    ],
+    parTime: 14,
+    parTissue: 1100,
+  },
+  {
+    id: 10,
+    name: "지뢰밭 화장실 (The Fart Bomb Zone)",
+    intro: "바닥에 조심성 없는 동생이 유황 똥 폭탄 지뢰들을 흩뿌려 두었습니다. 닿기만 해도 대형 폭발사고가 일어납니다! 💩💣💥",
+    hint: "바닥의 똥 지뢰를 밟거나, 그 위에 휴지 선이 올려져 있으면 즉시 폭발하여 바지가 뜨거워집니다! 완벽히 우회하세요.",
+    start: { x: 80, y: 300 },
+    toilet: { x: 720, y: 300 },
+    obstacles: [
+      { x: 380, y: 150, width: 60, height: 300, label: "파티션 🧱", color: "#4e342e" }
+    ],
+    puddles: [],
+    monsters: [],
+    bombs: [
+      { x: 200, y: 150, r: 24, label: "똥지뢰 💩💣" },
+      { x: 200, y: 450, r: 24, label: "똥지뢰 💩💣" },
+      { x: 600, y: 150, r: 24, label: "똥지뢰 💩💣" },
+      { x: 600, y: 450, r: 24, label: "똥지뢰 💩💣" }
+    ],
+    parTime: 12,
+    parTissue: 1150,
+  },
+  {
+    id: 11,
+    name: "살아있는 웅덩이 (The Mirage Oasis)",
+    intro: "오 마이 갓! 화장실 앞 수도관이 완전히 터져서 물웅덩이들이 살아서 꿈틀꿈틀 방바닥을 돌아다닙니다! 💦🌀",
+    hint: "웅덩이들이 일정한 궤도로 배회하므로, 타이밍을 극대화하여 물이 피하는 찰나에 빠르게 선을 긋고 질주해야 합니다.",
+    start: { x: 80, y: 150 },
+    toilet: { x: 720, y: 450 },
+    obstacles: [
+      { x: 450, y: 100, width: 60, height: 400, label: "싱크대 🚰", color: "#37474f" }
+    ],
+    puddles: [], // we will place moving puddles here
+    movingPuddles: [
+      {
+        id: "mp1",
+        x: 250,
+        y: 100,
+        r: 60,
+        speed: 2.5,
+        pathType: "pingpong",
+        waypoints: [
+          { x: 250, y: 100 },
+          { x: 250, y: 500 }
+        ],
+        label: "흘러가는 물 💦"
+      },
+      {
+        id: "mp2",
+        x: 620,
+        y: 500,
+        r: 50,
+        speed: 3.0,
+        pathType: "pingpong",
+        waypoints: [
+          { x: 620, y: 500 },
+          { x: 620, y: 100 }
+        ],
+        label: "흘러가는 물 💦"
+      }
+    ],
+    monsters: [],
+    parTime: 13,
+    parTissue: 1000,
+  },
+  {
+    id: 12,
+    name: "반려견의 습격 (The Puppy Chase)",
+    intro: "고양이보다 세 배는 더 날렵하고 거칠게 기어 다니는 광폭 불독이 내 휴지를 물어뜯기 위해 쫓아옵니다! 🐶🦴",
+    hint: "불독은 고속으로 사각형 궤도를 돕니다. 그 속도가 엄청나므로 타이밍을 놓치면 바로 휴지 끈이 끊어집니다!",
+    start: { x: 80, y: 500 },
+    toilet: { x: 720, y: 100 },
+    obstacles: [
+      { x: 300, y: 200, width: 200, height: 200, label: "개집 🏠", color: "#8d6e63" }
+    ],
+    puddles: [],
+    monsters: [
+      {
+        id: "puppy1",
+        name: "지랄견 불독 🐶",
+        x: 200,
+        y: 150,
+        r: 25,
+        speed: 6.8, // extremely fast!
+        pathType: "pingpong", // travels in a loop
+        waypoints: [
+          { x: 180, y: 120 },
+          { x: 620, y: 120 },
+          { x: 620, y: 480 },
+          { x: 180, y: 480 }
+        ]
+      }
+    ],
+    parTime: 12,
+    parTissue: 1200,
+  },
+  {
+    id: 13,
+    name: "우주 종말의 변기 (The Toilet Apocalypse)",
+    intro: "축하합니다. 대장정의 완결판. 모든 방해 요소들이 한자리에 모였습니다. 당신의 괄약근 한계에 직면하십시오! 🚽🌪️💥",
+    hint: "순찰 도는 어머니, 피복 스파크, 쫓아오는 똥 몬스터, 똥 지뢰, 움직이는 물웅덩이까지 모두 존재합니다. 완벽한 판단력만이 살길입니다.",
+    start: { x: 60, y: 80 },
+    toilet: { x: 740, y: 520 },
+    obstacles: [
+      { x: 220, y: 50, width: 60, height: 220, label: "장식장 🧱", color: "#37474f" },
+      { x: 520, y: 330, width: 60, height: 220, label: "수납장 🧱", color: "#37474f" }
+    ],
+    puddles: [],
+    movingPuddles: [
+      {
+        id: "mp_final",
+        x: 400,
+        y: 450,
+        r: 55,
+        speed: 2.2,
+        pathType: "pingpong",
+        waypoints: [
+          { x: 300, y: 450 },
+          { x: 650, y: 450 }
+        ],
+        label: "넘친 수조 물 💦"
+      }
+    ],
+    monsters: [
+      {
+        id: "poop_final",
+        name: "살아있는 거대 똥 💩",
+        x: 390,
+        y: 300,
+        r: 32,
+        speed: 2.2,
+        pathType: "chase",
+      }
+    ],
+    sparks: [
+      { x: 150, y: 420, r: 30, speed: 0.05, label: "전기 누전 🔌⚡" }
+    ],
+    bombs: [
+      { x: 450, y: 150, r: 20, label: "지뢰 💩" }
+    ],
+    motherPatrol: {
+      name: "순찰 어머니 👵",
+      x: 600,
+      y: 100,
+      r: 20,
+      sightRadius: 90,
+      speed: 2.5,
+      pathType: "pingpong",
+      waypoints: [
+        { x: 650, y: 220 },
+        { x: 650, y: 500 }
+      ]
+    },
+    parTime: 18,
+    parTissue: 1400,
   }
 ];
