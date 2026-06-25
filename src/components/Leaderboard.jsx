@@ -31,11 +31,10 @@ const DEFAULT_LEADERBOARD = {
   ]
 };
 
-export default function Leaderboard({ levelId, latestRun, onBack }) {
+export default function Leaderboard({ levelId, latestRun, userSession, onTriggerLogin, onBack }) {
   const [scores, setScores] = useState([]);
-  const [userName, setUserName] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [activeTab, setActiveTab] = useState('global'); // 'global' or 'local'
+  const [activeTab, setActiveTab] = useState('global');
   const [localScores, setLocalScores] = useState([]);
 
   // Load global leaderboard from public json
@@ -95,19 +94,20 @@ export default function Leaderboard({ levelId, latestRun, onBack }) {
   // 2. Submit globally via GitHub Issue
   const handleSubmitGlobal = (e) => {
     e.preventDefault();
-    if (!userName.trim() || !latestRun) return;
+    if (!userSession || !latestRun) return;
 
     soundManager.playSelect();
     
     // Save to local list first
-    handleSubmitLocal(userName.trim());
+    handleSubmitLocal(userSession.name);
 
     // Generate GitHub Issue payload
-    const title = `[SCORE_SUBMIT] Lv.${levelId} - ${latestRun.score}점 (닉네임: ${userName.trim()})`;
+    const title = `[SCORE_SUBMIT] Lv.${levelId} - ${latestRun.score}점 (닉네임: ${userSession.name})`;
     
     const payload = {
       levelId: parseInt(levelId),
-      name: userName.trim(),
+      name: userSession.name,
+      passcode: userSession.passcode,
       score: latestRun.score,
       time: latestRun.time.toString(),
       tissue: latestRun.tissueUsed,
@@ -187,56 +187,69 @@ export default function Leaderboard({ levelId, latestRun, onBack }) {
 
       {/* Global submit box */}
       {latestRun && !submitted && (
-        <form onSubmit={handleSubmitGlobal} style={{
+        <div style={{
           background: 'rgba(255, 235, 59, 0.08)',
           padding: '16px',
           borderRadius: '12px',
           border: '1px solid rgba(255, 235, 59, 0.25)',
-          marginBottom: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px'
+          marginBottom: '20px'
         }}>
-          <div style={{ textAlign: 'center', fontSize: '15px' }}>
+          <div style={{ textAlign: 'center', fontSize: '15px', marginBottom: '8px' }}>
             🎉 이번 판 획득 점수: <strong style={{ color: '#ffeb3b', fontSize: '18px' }}>{latestRun.score}점</strong>
           </div>
-          <div style={{ fontSize: '12px', textAlign: 'center', color: '#b0bec5' }}>
+          <div style={{ fontSize: '12px', textAlign: 'center', color: '#b0bec5', marginBottom: '12px' }}>
             나의 괄약근 등급: <strong style={{ color: '#00e676' }}>{getRankTitle(latestRun.score)}</strong>
           </div>
           
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type="text"
-              placeholder="닉네임 입력 (최대 10자)"
-              maxLength={10}
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              required
-              style={{
-                flex: 1,
-                padding: '10px',
-                borderRadius: '8px',
-                border: 'none',
-                background: '#2d2d38',
-                color: '#ffffff',
-                outline: 'none',
-                fontSize: '14px'
-              }}
-            />
-            <button type="submit" className="btn-comic btn-yellow" style={{
-              padding: '10px 16px',
-              fontSize: '13px',
-              boxShadow: '2px 2px 0px #000'
-            }}>
-              🌍 글로벌 랭킹 등록
-            </button>
-          </div>
-          
-          <div style={{ fontSize: '10px', color: '#b0bec5', textAlign: 'center', lineHeight: '1.3' }}>
-            * 랭킹 등록 클릭 시 GitHub Issues 생성 탭이 열립니다. <br/>
-            [Submit new issue]를 누르시면 GitHub Action이 자동으로 랭킹을 갱신해 줍니다!
-          </div>
-        </form>
+          {userSession ? (
+            <form onSubmit={handleSubmitGlobal} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={userSession.name}
+                  disabled
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#1f1f28',
+                    color: '#00e676',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    cursor: 'not-allowed'
+                  }}
+                />
+                <button type="submit" className="btn-comic btn-yellow" style={{
+                  padding: '10px 16px',
+                  fontSize: '13px',
+                  boxShadow: '2px 2px 0px #000'
+                }}>
+                  🌍 글로벌 랭킹 등록
+                </button>
+              </div>
+              
+              <div style={{ fontSize: '10px', color: '#b0bec5', textAlign: 'center', marginTop: '4px', lineHeight: '1.3' }}>
+                * <strong>{userSession.name}</strong> 계정으로 등록을 시도합니다. (Passcode: ****)<br/>
+                [글로벌 랭킹 등록] 클릭 시 GitHub Issues 생성 창이 열립니다. [Submit new issue]를 눌러주세요.
+              </div>
+            </form>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '6px 0' }}>
+              <p style={{ fontSize: '12px', color: '#ff8a65', marginBottom: '10px' }}>
+                ⚠️ 글로벌 랭킹을 보호하고 등록하려면 간편 로그인이 필요합니다!
+              </p>
+              <button
+                type="button"
+                onClick={onTriggerLogin}
+                className="btn-comic btn-yellow"
+                style={{ padding: '8px 16px', fontSize: '13px', boxShadow: '2px 2px 0px #000' }}
+              >
+                🔑 간편 로그인 / 가입하러 가기
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* SCORES DISPLAY LIST */}

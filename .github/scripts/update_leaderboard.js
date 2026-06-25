@@ -21,12 +21,13 @@ async function run() {
     }
 
     const data = JSON.parse(jsonMatch[1].trim());
-    const { levelId, name, score, time, tissue, path: ghostPath } = data;
+    const { levelId, name, passcode, score, time, tissue, path: ghostPath } = data;
 
     // Validate data types
     if (
       typeof levelId !== 'number' ||
       typeof name !== 'string' ||
+      typeof passcode !== 'string' ||
       typeof score !== 'number' ||
       typeof time !== 'string' ||
       typeof tissue !== 'number' ||
@@ -38,10 +39,38 @@ async function run() {
 
     // Sanitize username (limit to 10 chars, remove HTML tags)
     const sanitizedName = name.replace(/<[^>]*>/g, '').substring(0, 10) || '익명';
+    const sanitizedPasscode = passcode.trim();
 
+    if (!sanitizedPasscode) {
+      console.error("Passcode cannot be empty.");
+      process.exit(1);
+    }
+
+    const usersFilePath = path.join(__dirname, '../../public/users.json');
     const leaderboardFilePath = path.join(__dirname, '../../public/leaderboard.json');
-    
-    // Load existing leaderboard
+
+    // 1. Verify User Credentials (Hijacking Prevention)
+    let users = {};
+    if (fs.existsSync(usersFilePath)) {
+      users = JSON.parse(fs.readFileSync(usersFilePath, 'utf8'));
+    }
+
+    if (users[sanitizedName]) {
+      // User exists, verify passcode
+      if (users[sanitizedName] !== sanitizedPasscode) {
+        console.error(`CREDENTIALS_FAILED: The username "${sanitizedName}" is protected. The passcode provided does not match.`);
+        // Write a marker file so the Github workflow can read it to leave a warning comment!
+        fs.writeFileSync(path.join(__dirname, 'auth_failed.txt'), `닉네임 보호 실패: "${sanitizedName}"은 보호된 닉네임입니다. 입력하신 비밀번호가 올바르지 않습니다. 🚨`);
+        process.exit(1);
+      }
+    } else {
+      // User is brand new, register passcode
+      users[sanitizedName] = sanitizedPasscode;
+      fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2), 'utf8');
+      console.log(`Registered new user: ${sanitizedName}`);
+    }
+
+    // 2. Load and Update Leaderboard
     let leaderboard = {};
     if (fs.existsSync(leaderboardFilePath)) {
       leaderboard = JSON.parse(fs.readFileSync(leaderboardFilePath, 'utf8'));
@@ -51,7 +80,6 @@ async function run() {
       leaderboard[levelId] = [];
     }
 
-    // Append new entry
     const newEntry = {
       name: sanitizedName,
       score: score,

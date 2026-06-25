@@ -13,6 +13,15 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [muted, setMuted] = useState(false);
   
+  // User Authentication
+  const [userSession, setUserSession] = useState(() => {
+    const stored = localStorage.getItem('toilet_user_session');
+    return stored ? JSON.parse(stored) : null;
+  });
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginName, setLoginName] = useState('');
+  const [loginPasscode, setLoginPasscode] = useState('');
+
   // Scoring & Stats
   const [totalScore, setTotalScore] = useState(0);
   const [levelHighScores, setLevelHighScores] = useState({});
@@ -26,13 +35,11 @@ export default function App() {
 
   // Load high scores and unlock skins on mount
   useEffect(() => {
-    // Load scores
     const storedScores = localStorage.getItem('toilet_level_highscores');
     if (storedScores) {
       const parsed = JSON.parse(storedScores);
       setLevelHighScores(parsed);
       
-      // Calculate total score
       const total = Object.values(parsed).reduce((sum, item) => sum + (item.score || 0), 0);
       setTotalScore(total);
     }
@@ -106,7 +113,7 @@ export default function App() {
 
   const handleSelectSkin = (skin) => {
     if (skin.locked && totalScore < skin.unlockScore) {
-      soundManager.playFart(); // Buzz on locked selection
+      soundManager.playFart();
       return;
     }
     soundManager.playSelect();
@@ -117,7 +124,6 @@ export default function App() {
     setLatestRun(scoreData);
     setGameState('win');
     
-    // Save high score if higher
     const currentHigh = levelHighScores[currentLevel.id]?.score || 0;
     if (scoreData.score > currentHigh) {
       const newHighs = {
@@ -142,12 +148,34 @@ export default function App() {
   };
 
   const recordGhostRun = (pathArray) => {
-    // Only record if this is the best run (or if no ghost exists)
     const currentHigh = levelHighScores[currentLevel.id]?.score || 0;
     if (!latestRun || latestRun.score >= currentHigh) {
       localStorage.setItem(`toilet_ghost_${currentLevel.id}`, JSON.stringify(pathArray));
       setGhostPath(pathArray);
     }
+  };
+
+  // Login handlers
+  const handleLoginSubmit = (e) => {
+    e.preventDefault();
+    if (!loginName.trim() || loginPasscode.length !== 4) return;
+    
+    soundManager.playSelect();
+    const session = {
+      name: loginName.trim(),
+      passcode: loginPasscode
+    };
+    setUserSession(session);
+    localStorage.setItem('toilet_user_session', JSON.stringify(session));
+    setShowLoginModal(false);
+    setLoginName('');
+    setLoginPasscode('');
+  };
+
+  const handleLogout = () => {
+    soundManager.playFart();
+    setUserSession(null);
+    localStorage.removeItem('toilet_user_session');
   };
 
   return (
@@ -168,9 +196,21 @@ export default function App() {
           <span style={{ fontSize: '12px', color: '#b0bec5', fontWeight: '600' }}>경쟁의 소용돌이! 휴지를 수호하라!</span>
         </div>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* USER SESSION BAR */}
+          {userSession ? (
+            <div className="glass" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', fontSize: '12px', border: '1px solid rgba(0, 230, 118, 0.2)' }}>
+              <span style={{ color: '#00e676', fontWeight: 'bold' }}>👤 {userSession.name} 로그인됨</span>
+              <button onClick={handleLogout} className="btn-comic btn-grey" style={{ padding: '4px 8px', fontSize: '10px', boxShadow: '1px 1px 0px #000' }}>로그아웃</button>
+            </div>
+          ) : (
+            <button onClick={() => { soundManager.playSelect(); setShowLoginModal(true); }} className="btn-comic btn-yellow" style={{ padding: '8px 12px', fontSize: '12px', boxShadow: '2px 2px 0px #000' }}>
+              🔑 로그인 / 가입
+            </button>
+          )}
+
           <div className="glass" style={{ padding: '8px 16px', fontSize: '14px', border: '1px solid rgba(0, 229, 255, 0.2)' }}>
-            🏆 누적 괄약근력 점수: <strong style={{ color: '#ffeb3b', fontSize: '16px' }}>{totalScore}점</strong>
+            🏆 누적 점수: <strong style={{ color: '#ffeb3b', fontSize: '16px' }}>{totalScore}점</strong>
           </div>
           <button onClick={handleMuteToggle} className="btn-comic btn-grey" style={{ padding: '8px 12px', boxShadow: '2px 2px 0px #000' }}>
             {muted ? '🔇 음소거 해제' : '🔊 사운드 ON'}
@@ -181,7 +221,6 @@ export default function App() {
       {/* LOBBY / MAIN MENU */}
       {gameState === 'idle' && !showLeaderboard && (
         <div className="lobby-container">
-          {/* Main Panel: Level select */}
           <div className="lobby-main glass">
             <h2 style={{ fontFamily: 'var(--font-heading)', color: '#ffeb3b', marginBottom: '16px', fontSize: '24px' }}>
               🎯 화장실 맵 선택 (Level Select)
@@ -230,7 +269,6 @@ export default function App() {
               })}
             </div>
             
-            {/* Level details & Play button */}
             <div style={{
               marginTop: '24px',
               padding: '16px',
@@ -267,7 +305,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Sidebar: Skin shop & Customization */}
           <div className="lobby-sidebar glass">
             <h2 style={{ fontFamily: 'var(--font-heading)', color: '#ffeb3b', fontSize: '20px', marginBottom: '8px' }}>
               🧻 스킨 상점
@@ -313,7 +350,9 @@ export default function App() {
       {showLeaderboard && (
         <Leaderboard
           levelId={currentLevel.id}
-          latestRun={null}
+          latestRun={latestRun}
+          userSession={userSession}
+          onTriggerLogin={() => setShowLoginModal(true)}
           onBack={handleBackToLobby}
         />
       )}
@@ -322,7 +361,6 @@ export default function App() {
       {gameState !== 'idle' && !showLeaderboard && (
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
           
-          {/* Level Header HUD */}
           <div className="glass" style={{
             width: '100%',
             maxWidth: '800px',
@@ -360,7 +398,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Core Interactive Game Canvas */}
           <GameCanvas
             level={currentLevel}
             gameState={gameState}
@@ -374,10 +411,9 @@ export default function App() {
             ghostPlaybackActive={ghostEnabled}
           />
           
-          {/* Help hint below canvas */}
           <div style={{ textAlign: 'center', fontSize: '13px', color: '#b0bec5', maxWidth: '600px', fontStyle: 'italic' }}>
-            {gameState === 'drawing' && `👉 마우스로 노란 동그라미(캐릭터)를 꾹 누르고 끄집어당겨 변기(🚽)까지 부드럽게 선을 그으세요!`}
-            {gameState === 'running' && `🏃 캐릭터가 급똥을 누러 기어가는 중입니다! 몬스터나 물을 피해 휴지가 무사하길 기도하세요!`}
+            {gameState === 'drawing' && `👉 마우스로 캐릭터를 꾹 누르고 끄집어당겨 변기(🚽)까지 선을 그으세요!`}
+            {gameState === 'running' && `🏃 캐릭터가 기어가는 중입니다! 몬스터나 물을 피해 휴지가 무사하길 기도하세요!`}
           </div>
 
           {/* PAUSE OVERLAY */}
@@ -534,6 +570,78 @@ export default function App() {
             </div>
           )}
 
+        </div>
+      )}
+
+      {/* LOGIN MODAL */}
+      {showLoginModal && (
+        <div className="glass" style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 200,
+          padding: '30px',
+          width: '340px',
+          border: '2px solid var(--color-primary)',
+          textAlign: 'center',
+          background: 'rgba(30, 30, 38, 0.95)',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
+        }}>
+          <span style={{ fontSize: '32px', display: 'block', marginBottom: '8px' }}>🔑</span>
+          <h2 style={{ color: '#ffeb3b', marginBottom: '12px', fontFamily: 'var(--font-heading)', fontSize: '20px' }}>
+            괄약근 간편 가입 & 로그인
+          </h2>
+          <p style={{ fontSize: '11px', color: '#b0bec5', marginBottom: '20px', lineHeight: '1.4' }}>
+            입력하신 닉네임과 비밀번호(4자리)는 저장소에 최초 등록 후 비밀번호가 보호막 역할을 하여, 타인이 닉네임을 도용하지 못하도록 방지합니다!
+          </p>
+          <form onSubmit={handleLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <input
+              type="text"
+              placeholder="닉네임 입력 (최대 10자)"
+              maxLength={10}
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
+              required
+              style={{
+                padding: '10px',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#2d2d38',
+                color: '#fff',
+                outline: 'none',
+                fontSize: '14px'
+              }}
+            />
+            <input
+              type="password"
+              placeholder="비밀번호 4자리 숫자"
+              maxLength={4}
+              pattern="\d{4}"
+              value={loginPasscode}
+              onChange={(e) => setLoginPasscode(e.target.value)}
+              required
+              style={{
+                padding: '10px',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#2d2d38',
+                color: '#fff',
+                outline: 'none',
+                textAlign: 'center',
+                letterSpacing: '4px',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button type="submit" className="btn-comic btn-yellow" style={{ flex: 1, padding: '10px', fontSize: '13px' }}>
+                가입/로그인
+              </button>
+              <button type="button" onClick={() => setShowLoginModal(false)} className="btn-comic btn-grey" style={{ flex: 1, padding: '10px', fontSize: '13px' }}>
+                취소
+              </button>
+            </div>
+          </form>
         </div>
       )}
       
