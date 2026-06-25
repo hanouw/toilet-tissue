@@ -1,5 +1,6 @@
 // Vercel Serverless Function: api/scores.js
-// Interfaces directly with Vercel KV Redis REST API to manage scores, users, and ghost paths
+// Supports both Vercel KV REST API and Redis Cloud / TCP connection
+import { createClient } from 'redis';
 
 export default async function handler(req, res) {
   // CORS Headers
@@ -18,31 +19,58 @@ export default async function handler(req, res) {
 
   const kvUrl = process.env.KV_REST_API_URL;
   const kvToken = process.env.KV_REST_API_TOKEN;
+  const redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
 
-  if (!kvUrl || !kvToken) {
+  const isVercelKV = kvUrl && kvToken;
+  const isRedisCloud = !!redisUrl;
+
+  if (!isVercelKV && !isRedisCloud) {
     return res.status(500).json({
-      error: 'Vercel KV Database variables (KV_REST_API_URL / KV_REST_API_TOKEN) are not configured. Please link a KV Storage in Vercel.'
+      error: 'Redis database configuration is missing. Please link Redis Cloud (REDIS_URL) or Vercel KV in your Vercel project setting.'
     });
   }
 
-  // Helper function to query Redis REST API
+  // Helper function to query Redis REST API or TCP API
   async function redisCommand(commandArray) {
-    const response = await fetch(kvUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${kvToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(commandArray)
-    });
-    
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Redis REST error: ${text}`);
+    if (isVercelKV) {
+      const response = await fetch(kvUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${kvToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(commandArray)
+      });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Redis REST error: ${text}`);
+      }
+      
+      const data = await response.json();
+      return data.result;
+    } else {
+      const client = createClient({ url: redisUrl });
+      await client.connect();
+      try {
+        const [op, ...args] = commandArray;
+        let result;
+        if (op === 'GET') {
+          result = await client.get(args[0]);
+        } else if (op === 'SET') {
+          result = await client.set(args[0], args[1]);
+        } else if (op === 'HGET') {
+          result = await client.hGet(args[0], args[1]);
+        } else if (op === 'HSET') {
+          result = await client.hSet(args[0], args[1], args[2]);
+        } else {
+          throw new Error(`Unsupported Redis command: ${op}`);
+        }
+        return result;
+      } finally {
+        await client.disconnect();
+      }
     }
-    
-    const data = await response.json();
-    return data.result;
   }
 
   // 1. GET Request: Fetch Leaderboard and Ghost for a level

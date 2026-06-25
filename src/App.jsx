@@ -33,6 +33,9 @@ export default function App() {
   const [ghostPath, setGhostPath] = useState(null);
   const [ghostEnabled, setGhostEnabled] = useState(true);
 
+  // Double-tap/Double-click tracking for stage select
+  const lastClickTimeRef = React.useRef({});
+
   // Load high scores and unlock skins on mount
   useEffect(() => {
     const storedScores = localStorage.getItem('toilet_level_highscores');
@@ -387,7 +390,15 @@ export default function App() {
                     className={`level-card ${isSelected ? 'selected' : ''}`}
                     onClick={() => {
                       if (isUnlocked) {
-                        handleSelectLevel(lvl);
+                        const now = Date.now();
+                        const DOUBLE_PRESS_DELAY = 300;
+                        if (lastClickTimeRef.current[lvl.id] && (now - lastClickTimeRef.current[lvl.id] < DOUBLE_PRESS_DELAY)) {
+                          handleSelectLevel(lvl);
+                          handleStartDraw();
+                        } else {
+                          handleSelectLevel(lvl);
+                        }
+                        lastClickTimeRef.current[lvl.id] = now;
                       } else {
                         soundManager.playFart();
                       }
