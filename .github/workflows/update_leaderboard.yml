@@ -1,0 +1,52 @@
+name: Update Global Leaderboard
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update-scores:
+    if: startsWith(github.event.issue.title, '[SCORE_SUBMIT]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-size: 20
+
+      - name: Run Leaderboard Updater Script
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node .github/scripts/update_leaderboard.js
+
+      - name: Commit and Push Leaderboard Changes
+        run: |
+          git config --global user.name "Toilet Bot 🧻"
+          git config --global user.email "toilet-bot@github.com"
+          git add public/leaderboard.json public/ghost_level_*.json
+          git commit -m "chore: update global leaderboard & ghost path [skip ci]" || echo "No changes to commit"
+          git push origin main
+
+      - name: Close Issue and Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "🎉 **글로벌 랭킹 등록 완료!**\n\n귀하의 명예로운 괄약근 점수가 전 세계 리더보드에 영구 박제되었습니다. Vercel 배포망을 타고 몇 분 내로 실시간 반영됩니다. 🚽✨"
+            });
+            github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });

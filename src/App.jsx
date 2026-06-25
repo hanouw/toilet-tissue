@@ -1,0 +1,546 @@
+import React, { useState, useEffect } from 'react';
+import { LEVELS } from './utils/levels';
+import { SKINS } from './utils/skins';
+import { soundManager } from './utils/sound';
+import GameCanvas from './components/GameCanvas';
+import Leaderboard from './components/Leaderboard';
+import './App.css';
+
+export default function App() {
+  const [currentLevel, setCurrentLevel] = useState(LEVELS[0]);
+  const [selectedSkin, setSelectedSkin] = useState(SKINS[0]);
+  const [gameState, setGameState] = useState('idle'); // 'idle' | 'drawing' | 'running' | 'win' | 'failed'
+  const [isPaused, setIsPaused] = useState(false);
+  const [muted, setMuted] = useState(false);
+  
+  // Scoring & Stats
+  const [totalScore, setTotalScore] = useState(0);
+  const [levelHighScores, setLevelHighScores] = useState({});
+  const [latestRun, setLatestRun] = useState(null);
+  const [failReason, setFailReason] = useState('');
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  // Ghosts competitive system
+  const [ghostPath, setGhostPath] = useState(null);
+  const [ghostEnabled, setGhostEnabled] = useState(true);
+
+  // Load high scores and unlock skins on mount
+  useEffect(() => {
+    // Load scores
+    const storedScores = localStorage.getItem('toilet_level_highscores');
+    if (storedScores) {
+      const parsed = JSON.parse(storedScores);
+      setLevelHighScores(parsed);
+      
+      // Calculate total score
+      const total = Object.values(parsed).reduce((sum, item) => sum + (item.score || 0), 0);
+      setTotalScore(total);
+    }
+  }, []);
+
+  // Update ghost path when level changes (tries global first, falls back to local)
+  useEffect(() => {
+    const loadGhost = async () => {
+      try {
+        const response = await fetch(`/ghost_level_${currentLevel.id}.json`);
+        if (response.ok) {
+          const pathArray = await response.json();
+          if (Array.isArray(pathArray) && pathArray.length > 0) {
+            setGhostPath(pathArray);
+            return;
+          }
+        }
+      } catch (e) {
+        // silent fallback
+      }
+
+      const storedGhost = localStorage.getItem(`toilet_ghost_${currentLevel.id}`);
+      if (storedGhost) {
+        setGhostPath(JSON.parse(storedGhost));
+      } else {
+        setGhostPath(null);
+      }
+    };
+
+    loadGhost();
+  }, [currentLevel]);
+
+  const handleMuteToggle = () => {
+    const nextMuted = !muted;
+    setMuted(nextMuted);
+    soundManager.resume();
+    soundManager.setMute(nextMuted);
+  };
+
+  const handleStartDraw = () => {
+    soundManager.resume();
+    soundManager.playSelect();
+    setGameState('drawing');
+    setIsPaused(false);
+  };
+
+  const handlePauseToggle = () => {
+    soundManager.playSelect();
+    setIsPaused(!isPaused);
+  };
+
+  const handleRestart = () => {
+    soundManager.playSelect();
+    setGameState('drawing');
+    setIsPaused(false);
+  };
+
+  const handleBackToLobby = () => {
+    soundManager.playSelect();
+    setGameState('idle');
+    setIsPaused(false);
+    setShowLeaderboard(false);
+  };
+
+  const handleSelectLevel = (lvl) => {
+    soundManager.playSelect();
+    setCurrentLevel(lvl);
+    setGameState('idle');
+    setShowLeaderboard(false);
+  };
+
+  const handleSelectSkin = (skin) => {
+    if (skin.locked && totalScore < skin.unlockScore) {
+      soundManager.playFart(); // Buzz on locked selection
+      return;
+    }
+    soundManager.playSelect();
+    setSelectedSkin(skin);
+  };
+
+  const handleWin = (scoreData) => {
+    setLatestRun(scoreData);
+    setGameState('win');
+    
+    // Save high score if higher
+    const currentHigh = levelHighScores[currentLevel.id]?.score || 0;
+    if (scoreData.score > currentHigh) {
+      const newHighs = {
+        ...levelHighScores,
+        [currentLevel.id]: {
+          score: scoreData.score,
+          time: scoreData.time,
+          tissue: scoreData.tissueUsed
+        }
+      };
+      setLevelHighScores(newHighs);
+      localStorage.setItem('toilet_level_highscores', JSON.stringify(newHighs));
+      
+      const newTotal = Object.values(newHighs).reduce((sum, item) => sum + item.score, 0);
+      setTotalScore(newTotal);
+    }
+  };
+
+  const handleLose = (reason) => {
+    setFailReason(reason);
+    setGameState('failed');
+  };
+
+  const recordGhostRun = (pathArray) => {
+    // Only record if this is the best run (or if no ghost exists)
+    const currentHigh = levelHighScores[currentLevel.id]?.score || 0;
+    if (!latestRun || latestRun.score >= currentHigh) {
+      localStorage.setItem(`toilet_ghost_${currentLevel.id}`, JSON.stringify(pathArray));
+      setGhostPath(pathArray);
+    }
+  };
+
+  return (
+    <div style={{ width: '100%', maxWidth: '1000px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      
+      {/* HEADER SECTION */}
+      <header style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        width: '100%',
+        paddingBottom: '16px',
+        borderBottom: '2px solid rgba(255,255,255,0.08)',
+        marginBottom: '20px'
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <h1 className="comic-title" style={{ margin: 0, fontSize: '2.5rem' }}>🧻 급똥 레이서 🚽</h1>
+          <span style={{ fontSize: '12px', color: '#b0bec5', fontWeight: '600' }}>경쟁의 소용돌이! 휴지를 수호하라!</span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="glass" style={{ padding: '8px 16px', fontSize: '14px', border: '1px solid rgba(0, 229, 255, 0.2)' }}>
+            🏆 누적 괄약근력 점수: <strong style={{ color: '#ffeb3b', fontSize: '16px' }}>{totalScore}점</strong>
+          </div>
+          <button onClick={handleMuteToggle} className="btn-comic btn-grey" style={{ padding: '8px 12px', boxShadow: '2px 2px 0px #000' }}>
+            {muted ? '🔇 음소거 해제' : '🔊 사운드 ON'}
+          </button>
+        </div>
+      </header>
+
+      {/* LOBBY / MAIN MENU */}
+      {gameState === 'idle' && !showLeaderboard && (
+        <div className="lobby-container">
+          {/* Main Panel: Level select */}
+          <div className="lobby-main glass">
+            <h2 style={{ fontFamily: 'var(--font-heading)', color: '#ffeb3b', marginBottom: '16px', fontSize: '24px' }}>
+              🎯 화장실 맵 선택 (Level Select)
+            </h2>
+            <p style={{ color: '#b0bec5', fontSize: '14px', marginBottom: '20px' }}>
+              스테이지를 고르고 마우스나 터치로 안전한 화장지 길을 설계해 탈출하세요!
+            </p>
+            
+            <div className="level-grid">
+              {LEVELS.map((lvl) => {
+                const isSelected = currentLevel.id === lvl.id;
+                const high = levelHighScores[lvl.id];
+                return (
+                  <div
+                    key={lvl.id}
+                    className={`level-card ${isSelected ? 'selected' : ''}`}
+                    onClick={() => handleSelectLevel(lvl)}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 'bold', fontSize: '16px', color: isSelected ? '#00e5ff' : '#ffffff' }}>
+                        Lv {lvl.id}. {lvl.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#b0bec5', marginTop: '4px' }}>
+                        {lvl.obstacles.length > 0 ? `🧱 장애물 ${lvl.obstacles.length}개` : '벽 없음'}
+                        {lvl.puddles.length > 0 ? ` 💦 물웅덩이 ${lvl.puddles.length}개` : ''}
+                        {lvl.monsters.length > 0 ? ` 👾 몬스터 ${lvl.monsters.length}마리` : ''}
+                      </div>
+                    </div>
+                    
+                    <div style={{ textAlign: 'right' }}>
+                      {high ? (
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ffeb3b' }}>
+                            {high.score}점
+                          </div>
+                          <div style={{ fontSize: '10px', color: '#b0bec5' }}>
+                            {high.time}초 / {high.tissue}m
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '12px', color: '#607d8b', fontStyle: 'italic' }}>기록 없음</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Level details & Play button */}
+            <div style={{
+              marginTop: '24px',
+              padding: '16px',
+              borderRadius: '12px',
+              background: 'rgba(0,0,0,0.25)',
+              borderLeft: '4px solid #ffeb3b'
+            }}>
+              <h3 style={{ fontSize: '15px', color: '#ffeb3b', marginBottom: '4px' }}>💬 스토리 & 상태</h3>
+              <p style={{ fontSize: '14px', lineHeight: '1.4', color: '#e0e0e0' }}>{currentLevel.intro}</p>
+              <div style={{ fontSize: '12px', color: '#00e5ff', marginTop: '8px', fontWeight: 'bold' }}>
+                💡 꿀팁: {currentLevel.hint}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px', marginTop: '24px' }}>
+              <button
+                onClick={handleStartDraw}
+                className="btn-comic btn-yellow"
+                style={{ flex: 2, padding: '16px', fontSize: '18px' }}
+              >
+                🎮 괄약근 탈출 작전 시작!
+              </button>
+              
+              <button
+                onClick={() => {
+                  soundManager.playSelect();
+                  setShowLeaderboard(true);
+                }}
+                className="btn-comic btn-cyan"
+                style={{ flex: 1 }}
+              >
+                🏆 랭킹 보기
+              </button>
+            </div>
+          </div>
+
+          {/* Sidebar: Skin shop & Customization */}
+          <div className="lobby-sidebar glass">
+            <h2 style={{ fontFamily: 'var(--font-heading)', color: '#ffeb3b', fontSize: '20px', marginBottom: '8px' }}>
+              🧻 스킨 상점
+            </h2>
+            <div style={{ fontSize: '11px', color: '#b0bec5', marginBottom: '12px' }}>
+              누적 점수로 스킨을 해금하여 캐릭터 속도를 높이고 쾌적하게 똥을 싸세요!
+            </div>
+            
+            <div className="skin-grid">
+              {SKINS.map((skin) => {
+                const isUnlocked = skin.unlocked || totalScore >= skin.unlockScore;
+                const isSelected = selectedSkin.id === skin.id;
+                
+                return (
+                  <div
+                    key={skin.id}
+                    className={`skin-card ${isSelected ? 'selected' : ''} ${!isUnlocked ? 'locked' : ''}`}
+                    onClick={() => handleSelectSkin({ ...skin, unlocked: isUnlocked })}
+                  >
+                    <span style={{ fontSize: '32px' }}>{isUnlocked ? skin.emoji : '🔒'}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? '#ffeb3b' : '#ffffff' }}>
+                        {skin.name}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#b0bec5', marginTop: '2px', lineHeight: '1.2' }}>
+                        {isUnlocked ? skin.description : `누적 ${skin.unlockScore}점 도달 시 잠금 해제`}
+                      </div>
+                    </div>
+                    {isUnlocked && (
+                      <span style={{ fontSize: '10px', color: '#00e5ff', background: 'rgba(0, 229, 255, 0.1)', padding: '2px 4px', borderRadius: '4px', position: 'absolute', top: '6px', right: '6px' }}>
+                        속도 x{skin.speed}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GAME LEADERBOARD SCREEN */}
+      {showLeaderboard && (
+        <Leaderboard
+          levelId={currentLevel.id}
+          latestRun={null}
+          onBack={handleBackToLobby}
+        />
+      )}
+
+      {/* GAMEPLAY SCREEN */}
+      {gameState !== 'idle' && !showLeaderboard && (
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          
+          {/* Level Header HUD */}
+          <div className="glass" style={{
+            width: '100%',
+            maxWidth: '800px',
+            padding: '12px 20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '2px solid rgba(0, 229, 255, 0.2)'
+          }}>
+            <div>
+              <span style={{ fontSize: '12px', textTransform: 'uppercase', color: '#00e5ff', fontWeight: 'bold' }}>
+                Stage 0{currentLevel.id}
+              </span>
+              <h2 style={{ fontSize: '18px', margin: 0, color: '#ffffff' }}>{currentLevel.name}</h2>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', color: '#b0bec5' }}>
+                <input
+                  type="checkbox"
+                  checked={ghostEnabled}
+                  onChange={() => setGhostEnabled(!ghostEnabled)}
+                  style={{ width: '15px', height: '15px', accentColor: '#00e5ff' }}
+                />
+                1위 고스트 라이벌 {ghostPath ? '⚡' : '(기록 없음)'}
+              </label>
+
+              <button onClick={handlePauseToggle} className="btn-comic btn-grey" style={{ padding: '6px 12px', fontSize: '13px', boxShadow: '2px 2px 0px #000' }}>
+                {isPaused ? '▶️ 계속하기' : '⏸️ 일시정지'}
+              </button>
+              
+              <button onClick={handleBackToLobby} className="btn-comic btn-red" style={{ padding: '6px 12px', fontSize: '13px', boxShadow: '2px 2px 0px #000' }}>
+                🏃 로비로 포기
+              </button>
+            </div>
+          </div>
+
+          {/* Core Interactive Game Canvas */}
+          <GameCanvas
+            level={currentLevel}
+            gameState={gameState}
+            setGameState={setGameState}
+            selectedSkin={selectedSkin}
+            onWin={handleWin}
+            onLose={handleLose}
+            isPaused={isPaused}
+            currentGhost={ghostPath}
+            recordGhostRun={recordGhostRun}
+            ghostPlaybackActive={ghostEnabled}
+          />
+          
+          {/* Help hint below canvas */}
+          <div style={{ textAlign: 'center', fontSize: '13px', color: '#b0bec5', maxWidth: '600px', fontStyle: 'italic' }}>
+            {gameState === 'drawing' && `👉 마우스로 노란 동그라미(캐릭터)를 꾹 누르고 끄집어당겨 변기(🚽)까지 부드럽게 선을 그으세요!`}
+            {gameState === 'running' && `🏃 캐릭터가 급똥을 누러 기어가는 중입니다! 몬스터나 물을 피해 휴지가 무사하길 기도하세요!`}
+          </div>
+
+          {/* PAUSE OVERLAY */}
+          {isPaused && (
+            <div className="glass" style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 100,
+              padding: '30px',
+              textAlign: 'center',
+              width: '320px',
+              border: '2px solid var(--color-primary)'
+            }}>
+              <h2 style={{ color: '#ffeb3b', marginBottom: '20px', fontFamily: 'var(--font-heading)' }}>💩 괄약근 멈춰!</h2>
+              <p style={{ color: '#e0e0e0', fontSize: '14px', marginBottom: '24px' }}>
+                시간이 지연될 수록 괄약근의 압박이 밀려올 수 있습니다... 조심하세요!
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <button onClick={handlePauseToggle} className="btn-comic btn-yellow" style={{ width: '100%' }}>
+                  ▶️ 괄약근 다시 작동 (Resume)
+                </button>
+                <button onClick={handleRestart} className="btn-comic btn-cyan" style={{ width: '100%' }}>
+                  🔄 처음부터 재도전 (Restart)
+                </button>
+                <button onClick={handleBackToLobby} className="btn-comic btn-red" style={{ width: '100%' }}>
+                  🏃 똥 싸는거 포기하고 항복
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* WIN MODAL */}
+          {gameState === 'win' && latestRun && (
+            <div className="glass" style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 100,
+              padding: '30px',
+              textAlign: 'center',
+              width: '380px',
+              border: '3px solid var(--color-success)',
+              boxShadow: '0px 0px 30px rgba(0, 230, 118, 0.4)'
+            }}>
+              <span style={{ fontSize: '64px', display: 'block', marginBottom: '10px' }}>🚽✨🎉</span>
+              <h2 style={{ color: '#00e676', fontSize: '28px', fontFamily: 'var(--font-heading)', marginBottom: '16px' }}>
+                골인 대성공!
+              </h2>
+              
+              <div style={{
+                background: 'rgba(0,0,0,0.3)',
+                padding: '16px',
+                borderRadius: '12px',
+                marginBottom: '20px',
+                fontSize: '14px',
+                textAlign: 'left',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}>
+                <div>⏱️ 탈출 소요 시간: <strong style={{ color: '#00e5ff' }}>{latestRun.time}초</strong></div>
+                <div>🧻 낭비한 화장지: <strong style={{ color: '#00e5ff' }}>{latestRun.tissueUsed}m</strong></div>
+                <div>💥 괄약근 한계점: <strong style={{ color: '#ff3d00' }}>{latestRun.urgency}%</strong></div>
+                <hr style={{ border: 'none', borderBottom: '1px solid rgba(255,255,255,0.1)' }} />
+                <div style={{ fontSize: '18px', textAlign: 'center', fontWeight: 'bold', color: '#ffeb3b', marginTop: '4px' }}>
+                  획득 점수: {latestRun.score}점
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  onClick={() => {
+                    soundManager.playSelect();
+                    setShowLeaderboard(true);
+                  }}
+                  className="btn-comic btn-yellow"
+                  style={{ width: '100%' }}
+                >
+                  🏆 랭킹 등록 & 확인하기
+                </button>
+                
+                {currentLevel.id < LEVELS.length ? (
+                  <button
+                    onClick={() => {
+                      const nextLvl = LEVELS.find(l => l.id === currentLevel.id + 1);
+                      if (nextLvl) handleSelectLevel(nextLvl);
+                      handleStartDraw();
+                    }}
+                    className="btn-comic btn-cyan"
+                    style={{ width: '100%' }}
+                  >
+                    ⏩ 다음 스테이지 도전!
+                  </button>
+                ) : (
+                  <div style={{ color: '#ffd700', fontWeight: 'bold', fontSize: '13px', margin: '6px 0' }}>
+                    👑 축하합니다! 모든 화장실을 정복했습니다! 👑
+                  </div>
+                )}
+                
+                <button onClick={handleRestart} className="btn-comic btn-grey" style={{ width: '100%' }}>
+                  🔄 한 번 더 도전해서 기록 갱신
+                </button>
+                
+                <button onClick={handleBackToLobby} className="btn-comic btn-red" style={{ width: '100%' }}>
+                  🏠 메인 메뉴로 나가기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* LOSE MODAL */}
+          {gameState === 'failed' && (
+            <div className="glass shake-urgent" style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 100,
+              padding: '30px',
+              textAlign: 'center',
+              width: '360px',
+              border: '3px solid var(--color-accent)',
+              boxShadow: '0px 0px 30px rgba(255, 61, 0, 0.4)'
+            }}>
+              <span style={{ fontSize: '64px', display: 'block', marginBottom: '10px' }}>😭💩💦</span>
+              <h2 style={{ color: '#ff3d00', fontSize: '26px', fontFamily: 'var(--font-heading)', marginBottom: '12px' }}>
+                으아아악! 폭발!
+              </h2>
+              
+              <p style={{
+                background: 'rgba(255, 61, 0, 0.1)',
+                border: '1px solid rgba(255, 61, 0, 0.2)',
+                padding: '12px',
+                borderRadius: '8px',
+                color: '#ff8a65',
+                fontSize: '14px',
+                lineHeight: '1.4',
+                marginBottom: '20px'
+              }}>
+                {failReason || "안타깝게도 화장실 골인에 실패하셨습니다... 바지가 차갑습니다..."}
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button onClick={handleRestart} className="btn-comic btn-yellow" style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                  🔄 눈물 닦고 다시 도전!
+                </button>
+                <button onClick={handleBackToLobby} className="btn-comic btn-grey" style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                  🏠 냄새나는 현장 탈출하기 (Lobby)
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+      
+      {/* FOOTER */}
+      <footer style={{ marginTop: '40px', fontSize: '12px', color: '#607d8b', textAlign: 'center', paddingBottom: '20px' }}>
+        Toilet Rush Game v1.0.0 © 2026. Made with 🧻 & 💩. B-grade comedy game series.
+      </footer>
+    </div>
+  );
+}
